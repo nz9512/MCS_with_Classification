@@ -4,41 +4,33 @@ function TPL_MCS
 clc; close all; clear all;
 
 % Setting the type of calculation:
-% 1. 'Probabilistic'> a MCS which includes 15 probabilistic input
+% 1. 'Probabilistic': a MCS which includes 15 probabilistic input
 % parameters and all other input variables set to median values
-% 2. 'Deterministic'> uses median values for all input parameters 
+% 2. 'Deterministic': uses median values for all input parameters 
 
 AnalysisType = 'Probabilistic'; % 
-
 
 % Set the number of MCS assessments by choosing the number of tubes to be
 % examined. TubeOrderByPoI is the order of assessment locations (i.e. tubes)
 % in order of descending probaiblity of failure (PoI, I = crack
-% initiation). Currently only the tube with the highest PoI is set to be examined.
+% initiation). Currently only the tubes with the highest 
+% PoI (e.g. TubeOrderByPoI(1:10)) are set to be examined.
 
 load('TubeOrderByPoI.mat'); 
 Tubes = TubeOrderByPoI(1); % Tubes = TubeOrderByPoI(1:37)';
 
-% Some settings relating to conducting various sensitivity analyses
 
-PostAsmtPlots = 0; % Producing plots to show the results from the analysis
-SAParam = 0; 
-Conduct_SA = 0;
-LHS_Bin = [];
-
-% Number of bin in the latin-hyerpercube per input parameter 
-
+% Number of bin in the latin-hyerpercube per input parameter:
 Nb = 1000;
 
 % Conducting the MCS
-
-[TotalDamage, LHS] = TPL_Prob_Asmt_V7(Nb,Tubes,AnalysisType,Conduct_SA,SAParam,LHS_Bin,PostAsmtPlots);
+[TotalDamage, LHS] = TPL_Prob_Asmt_V7(Nb,Tubes,AnalysisType);
 
 
 end
 
 
-function [TotalDamage, LHS] = TPL_Prob_Asmt_V7(Nb,Tubes,AnalysisType,Conduct_SA,SAParam,LHS_Bin,CondPostAsmtPlots)
+function [TotalDamage, LHS] = TPL_Prob_Asmt_V7(Nb,Tubes,AnalysisType)
 
 format long
 
@@ -47,7 +39,7 @@ format long
 Reset_Settings = 1; % This refers to the reshuffling of the latin-hypercube 
 Repeat_History_Data_Analysis = 0;
 Repeat_Transient_Sampling = 0;
-
+ReprepareWorkspace = 0;
 Plot_SS_Temp_Histograms = 0;
 Plot_SO_Samples = 0;
 Plot_Transient_Histograms = 0;
@@ -56,7 +48,6 @@ Plot_Transient_Histograms = 0;
 No_Asmt_Locations_Per_Tube = 1;
 Corr_SA = 0;
 CorrType = 'Spearman';
-
 PR_Options = 'PR'; % 'PR' OR 'CH' OR 'Zeta_P'
 
 
@@ -68,7 +59,9 @@ WorkSpace_Filename = ['WorkSpace_' num2str(Nb) '_Trials.mat'];
 Resultsfilename = ['Res_' AnalysisType '_Nb_' num2str(Nb) '_All_Tubes.mat'];
 
 
-
+% The analysis settings were kept fixed during the develpment stages of
+% this code (i.e. Reset_Settings = 0) but can be reset for future runs by
+% setting Reset_Settings = 1.
 
 if Reset_Settings
     
@@ -106,257 +99,93 @@ if Reset_Settings
     switch AnalysisType
         case 'Probabilistic'
             LHS = LHS_Permutations(Nb,Nv);
-            [LHS,~] = Correlated_Bins(LHS,1,2,0.545); % 0.545 is the mean correlation found from my work on correlations
-            
-            if Conduct_SA && SAParam ~= 0
-                LHS(:,SAParam) = LHS_Bin;
-            end
-            
+            [LHS,~] = Correlated_Bins(LHS,1,2,0.545); % 0.545 is the mean correlation found from my work on correlations  
         case 'Deterministic'
-            LHS = ones(1,15).*Nb/2; % The +1 is to include the start of dwell stress
-            
-            if Conduct_SA && SAParam ~= 0
-                LHS(:,SAParam) = LHS_Bin;
-            end
-            
+            LHS = ones(1,15).*Nb/2; % The +1 is to include the start of dwell stress       
     end
-    
+
     save(Asmt_Sets_Filename)
     
 else
-    
     load(Asmt_Sets_Filename)
-    
 end
 
 %% Preparing a workspace that's shared by all tubes
 
-ReprepareWorkspace = 1;
 
 if ReprepareWorkspace
     PrepareWorkSpace(Asmt_Sets_Filename,WorkSpace_Filename)
 end
 
-%% Parallet pool
+%% Parallel pool
+
+% Parallel for-loop is only set to work if more than one tube is being
+% asseessd. Parallelisation of the MCS trials is done simply by using
+% vectorisation. 
+
+% if Start_Parallel_Pool = 1, then N_Workers needs to be set manually. 
+% On an 8-core machine, 4-6 workers work well while keeping enough memory 
+% and cpu for the machine to do other functions.
 
 Start_Parallel_Pool = 0;
-N_Workers = 1;
+N_Workers = 2; 
 
 if Start_Parallel_Pool
     delete(gcp)
     parpool(N_Workers);
 end
 
-
 %% Run the assessment
 
 t = tic();
 
-% Ideal number of parallel workers for 100,000 is 3, and as such
-% there's one tube leftover. Hence the following addjustment
-
-Group1 = 1:(N_Workers.*floor(length(Tubes)/N_Workers));
-Group2 = Group1(end)+1:length(Tubes);
-
-GrouptedTubes1 = reshape(Tubes(Group1),[N_Workers,length(Tubes(Group1))/N_Workers]);
-GrouptedTubes2 = [Tubes(Group2)' ;zeros(N_Workers-length(Group2),1)];
-
-GrouptedTubes = [GrouptedTubes1, GrouptedTubes2];
-
-
-N_Groups = size(GrouptedTubes,2);
-
-N_Groups= 1;
-
-for G = 1:N_Groups
+if Start_Parallel_Pool
     
-    if sum(GrouptedTubes(:,G)==0) == 0
-        SubGroup = GrouptedTubes(:,G);
-    else
-        SubGroup = GrouptedTubes(GrouptedTubes(:,G)~=0,G); 
-    end
-    
-    for T = 1:length(SubGroup)
-
-        switch AnalysisType
-            case 'Probabilistic'
-                [TotalDamage{T},...
-                    Mean_Log_Damage{T},...
-                    STD_Log_Damage{T},...
-                    Prob_Fail{T},...
-                    SA_Indicies{T},...
-                    CovMat{T},...
-                    SO_Stress_SA{T}] = R5_Assessment(GrouptedTubes(T,G),WorkSpace_Filename,LHS);
-                
-            case 'Deterministic'
-                TotalDamage{T} = R5_Assessment(Tubes(T),WorkSpace_Filename,LHS);
-        end
+    parfor T = 1:length(Tubes)
         
+        [TotalDamage{T},TotalDamage_By_Cycle{T}] = R5_Assessment(Tubes(T),WorkSpace_Filename,LHS);
+        
+        csvwrite(['MCS_' num2str(Nb) '_Tube_' num2str(Tubes(T)) '_D_LHC.csv'],[TotalDamage{T} LHS])
+        csvwrite(['MCS_' num2str(Nb) '_Tube_' num2str(Tubes(T)) '_DbC.csv'],cell2mat(TotalDamage_By_Cycle{T}))
+       
+    end
+
+else
+    
+    for T = 1:length(Tubes)
+        
+        [TotalDamage{T},TotalDamage_By_Cycle{T}] = R5_Assessment(Tubes(T),WorkSpace_Filename,LHS);
+        
+        csvwrite(['MCS_' num2str(Nb) '_Tube_' num2str(Tubes(T)) '_D_LHC.csv'],[TotalDamage{T} LHS])
+        csvwrite(['MCS_' num2str(Nb) '_Tube_' num2str(Tubes(T)) '_DbC.csv'],cell2mat(TotalDamage_By_Cycle{T}))
+
     end
     
-    SubResultsfilename = ['Res_' AnalysisType '_Nb_' num2str(Nb) '_TubeGroup_' num2str(G) '_of_' num2str(N_Groups) '.mat'];
-    
-    if Nb <= 10000
-        save(SubResultsfilename)
-    elseif Nb > 10000
-        save(SubResultsfilename,'Tubes','TotalDamage','Mean_Log_Damage','STD_Log_Damage','Prob_Fail') % Saving a smaller data set when dealing with large trials
-    end
-    
-     clear TotalDamage Mean_Log_Damage STD_Log_Damage Prob_Fail SA_Indicies CovMat SO_Stress_SA
-
-
+end
 
 Elapsed_Time = toc(t);
 disp(['Total analysis time = ' num2str(Elapsed_Time./60) 'min'])
 
 
-%% Collate the results into one file
+% Mapping the failied trials onto the ductility distribution
 
-cd('C:\Users\nz9512\Google Drive\1. PhD Work\3. TPL FEA\PlayGround\11. Probabilistic Assessment\Final code\Final Results')
+figure; whitebg('w');set(gcf,'color','w');
+plot(LHS((TotalDamage{T} > 1),1)',LHS((TotalDamage{T} > 1),2)','xr','MarkerSize',14,'LineWidth',2);  hold on;
+plot(LHS(:,1)',LHS(:,2)','.k','MarkerSize',14,'LineWidth',2);
+xlabel('Ductility latin-hypercube bins (low to high)','FontSize', 12);ylabel('Creep rate latin-hypercube bins (slow to fast)','FontSize', 12);
+set(gca,'FontSize',12,'fontWeight','bold');
+set(findall(gcf,'type','text'),'fontSize',14,'fontWeight','bold');
+set(gca,'LineWidth',2);
 
-for T = 1:37
-    All_Prob_Fail{T} = [];
-    All_TotalDamage{T} = [];
-end
-
-
-for G = 1:N_Groups
-    
-    load(['Res_' AnalysisType '_Nb_' num2str(Nb) '_TubeGroup_' num2str(G) '_of_' num2str(N_Groups) '.mat']);
-    
-    for NSubG = 1:length(TotalDamage)
-        All_Prob_Fail{N_Workers*(G-1) + NSubG} = Prob_Fail{NSubG};
-        All_TotalDamage{N_Workers*(G-1) + NSubG} = TotalDamage{NSubG};
-        Median_TotalDamage(N_Workers*(G-1) + NSubG) = median(TotalDamage{NSubG});
-        
-    end
-    
-    Tubes(Tubes==0) = [];
-    
-    save(['Res_' AnalysisType '_Nb_' num2str(Nb) '_All_Tubes_SMRG_Server.mat'],'Tubes','All_Prob_Fail','All_TotalDamage','Median_TotalDamage')
-    
-end
-
-load(Resultsfilename)
-
-TotalDamage = All_TotalDamage;
-Prob_Fail = All_Prob_Fail;
-
-%% Post analysis: more plots and SA
-
-if CondPostAsmtPlots
-    switch AnalysisType
-        case 'Probabilistic'
-            for T = 1:length(Tubes)
-                
-%                 disp(['Prob Median Total Damage on Tube ' num2str(Tubes(T)) ' = ' num2str(median(TotalDamage{T}))])
-%                 
-%                 
-%                 % Plotting the PoF of each tube against cycle number
-%                 figure;whitebg('w'); set(gcf,'color','w');
-%                 
-%                 plot(Prob_Fail{T}); hold on; xlabel('Number of Cycles'); ylabel('PoF of Individual Tubes')
-                
-                
-
-                % Calculating the PoF for the whole TPL based on a 'first-pass-the-post' approach
-                
-                %                             TotalDamage_TPL = [];
-                %
-                %                             for T = 1:length(Tubes)
-                %                                 TotalDamage_TPL = horzcat(TotalDamage_TPL, TotalDamage{T});
-                %                             end
-                %
-                %                             PoF_TPL = sum((sum(TotalDamage_TPL>=1,2) >=1))./Nb;
-                %
-                %                             disp(['PoF for Tube ' num2str(Tubes(T)) ' = ' num2str(PoF_TPL)])
-                %
-                %                             % Plotting the binomial distribution based on the total number of tubeplates and the calcuated PoF
-                %
-                %                             N_tot = 2*2*2*4*4*1; % 2 Stations, 2 reactors each, 2 'something', 4 boiler pods each, 4 headers each, 1 tubeplate each
-                %
-                %                             PlotBinomialDistribution(PoF_TPL,N_tot)
-                
-                
-%                 % Looking at the covariance matrix
-%                 format short
-%                 
-%                 MeanCovMat = zeros(size(CovMat{T}{1}));
-%                 
-%                 for i = 1:length(CovMat{T})
-%                     MeanCovMat = MeanCovMat + CovMat{T}{i};
-%                 end
-%                 
-%                 MeanCovMat = MeanCovMat./length(CovMat{T});
-%                 
-%                 Parameters_Discription = {'Total damage','Ductility', 'Creep-rate','Zeta_p' ,'A (RO)' ,'S_y','E', '\alpha','N_f','Sigma_B','SU Str','RT Str','SU Temp','RT Temp','SO Temp','SO Str'};
-%                 
-%                 CorrLimit = 0.1;
-%                 
-%                 [I,J] = find((abs(MeanCovMat)>=CorrLimit) .* (MeanCovMat ~= 1 ));
-%                 
-%                 [IC] = find((abs(MeanCovMat)>=CorrLimit) .* (MeanCovMat ~= 1 ));
-%                 
-%                 
-%                 J(I==1) = [];
-%                 IC(I==1) = [];
-%                 I(I==1) =[];
-%                 
-%                 [CorrSA,ICC] = sort(abs(MeanCovMat(IC)));
-%                 
-%                 [~,UI] = unique(CorrSA);
-%                 
-%                 CovMat_Results.ParamDiscrip = [Parameters_Discription(I(ICC(UI)))' Parameters_Discription(J(ICC(UI)))'];
-%                 
-%                 CovMat_Results.InterParamCorrs = CorrSA(UI);
-                
-                
-                % Examaing parameter sensitivity through correlations
-                
-   %             Percentage_Contribution_Corr = CorrSensitivitityAnalysis(Tubes(T),Tubes,SA_Indicies,CovMat,SO_Stress_SA,TotalDamage,LHS);
-                
-                
-                % Mapping the failied trials onto the ductility distribution
-                
-%                 figure; whitebg('w');set(gcf,'color','w');
-%                 plot(LHS((TotalDamage{T} > 1),1)',LHS((TotalDamage{T} > 1),2)','xr','MarkerSize',14,'LineWidth',2);  hold on;
-%                 plot(LHS(:,1)',LHS(:,2)','.k','MarkerSize',14,'LineWidth',2);
-%                 xlabel('Ductility latin-hypercube bins (low to high)','FontSize', 12);ylabel('Creep rate latin-hypercube bins (slow to fast)','FontSize', 12);
-%                 set(gca,'FontSize',12,'fontWeight','bold');
-%                 set(findall(gcf,'type','text'),'fontSize',14,'fontWeight','bold');
-%                 set(gca,'LineWidth',2);
-%                 
-%                 legend(['Initiated trials - ' num2str(sum(TotalDamage{T} > 1)) ' out of ' num2str(length(TotalDamage{T}))])
-%                 set(gcf, 'Position', [50 50 750 750]);
-                
-                
-                % Fitting a distribution and estimating the PoF by integration
-                
-                MLE_Resutls = UoB_DistFitter_MLE(TotalDamage{T},'Lognormal');
-                LRM_Resutls = UoB_DistFitter_LRM(TotalDamage{T},'Lognormal');
-                
-                Estimated_PoF(T,:) = [ sum(TotalDamage{T}>=1)./length(TotalDamage{T}) 1 - cdf(MLE_Resutls.pd,1)  1 - cdf(LRM_Resutls.pd,1)];
-                
-                
-            end
-            
-            
-        case 'Deterministic'
-            
-            if length(Tubes) == 1
-                disp(['Det Total Damage on Tube ' num2str(Tubes(T)) ' = ' num2str(TotalDamage{T})])
-            else
-                figure; plot(cell2mat(TotalDamage),'xk')
-            end
-    end 
-end
+legend(['Initiated trials - ' num2str(sum(TotalDamage{T} > 1)) ' out of ' num2str(length(TotalDamage{T}))])
+set(gcf, 'Position', [50 50 750 750]);
 
 
 end
 
 %% Assessment Code
 
-function [TotalDamage,Mean_Log_Damage,STD_Log_Damage,Prob_Fail,SA_Indicies,CovMat,SO_Stress_SA] = R5_Assessment(Assess_Tube,WorkSpace_Filename,LHS)
+function [TotalDamage,TotalDamage_By_Cycle] = R5_Assessment(Assess_Tube,WorkSpace_Filename,LHS)
 
 
 load(WorkSpace_Filename)
@@ -388,8 +217,12 @@ end
 
 %% Prepare transients for probabilistic assessment
 
-[SU_Strs_Samples,SU_Temps_Samples,RT_Strs_Samples,RT_Temps_Samples] = AssignCycleTransients(Nb,LHS,CycleNo,Tube,Plot_Transient_Histograms,AnalysisType,Conduct_SA,SAParam);
-
+if Repeat_Transient_Sampling
+    [SU_Strs_Samples,SU_Temps_Samples,RT_Strs_Samples,RT_Temps_Samples] = AssignCycleTransients(Nb,LHS,CycleNo,Tube,Plot_Transient_Histograms,AnalysisType);
+    save(['Transient_Inputs_' num2str(Nb) '_Samples.mat'],'SU_Strs_Samples','SU_Temps_Samples','RT_Strs_Samples','RT_Temps_Samples')
+else
+    load(['Transient_Inputs_' num2str(Nb) '_Samples.mat']);
+end
 
 %% Qunatities related to BT and RC transients (these are incorprated within the history loop later)
 
@@ -594,20 +427,6 @@ for Event_No = 1:length(Dwell_Times)
             
             Event_Temp = round(ones(Nb,1)*All_Temps(Event_No) + dT_MetalTemp_Samples{Tube}{Tilts(Event_No)-9+C}(Str_MetTemp_Perm),4, 'significant');
             
-            switch AnalysisType
-                case 'Probabilistic'
-                    % This is for the case a SA is being conducted
-                    if Conduct_SA
-                        switch SAParam
-                            case 14
-                                Sorted_Event_Temp = sort(Event_Temp);
-                                Event_Temp = Sorted_Event_Temp(LHS(:,14));
-                        end
-                    end
-                case 'Deterministic'
-                    Sorted_Event_Temp = sort(Event_Temp);
-                    Event_Temp = Sorted_Event_Temp(LHS(:,14));
-            end
             
             AllCycleTemps = [AllCycleTemps,Event_Temp]; % Saving the prob temperatures for a single cycle
             
@@ -683,12 +502,7 @@ for Event_No = 1:length(Dwell_Times)
             StressBeginningDwell = Solve_RambergOsgood(Sigma_el,SigmaRupRef,Sigma_RD,A,Beta,E_bar,Nb,AnalysisType);
             
             Sorted_StressBeginningDwell = sort(StressBeginningDwell);
-            
-            % This is for the case a SA is being conducted
-            if Conduct_SA && SAParam == 9
-                StressBeginningDwell = Sorted_StressBeginningDwell(LHS(:,9));
-            end
-            
+                        
             % For a deterministic assessemnt, assign the median of Sigma_B
             switch AnalysisType
                 case 'Deterministic'
@@ -1154,11 +968,11 @@ for Event_No = 1:length(Dwell_Times)
         
         
         %% Tracking the total damage per cycle
-        TotalDamage_By_Cycle = Fatigue_Damage + Creep_Damage; % This is accumulated damage
+        TotalDamage_By_Cycle{Cycle_Counter} = Fatigue_Damage + Creep_Damage; % This is accumulated damage
         
-        Increment_of_TotalDamge_By_Cycle = TotalDamage_By_Cycle - Initial_TotalDamage_By_Cycle;
+        Increment_of_TotalDamge_By_Cycle = TotalDamage_By_Cycle{Cycle_Counter} - Initial_TotalDamage_By_Cycle;
         
-        Initial_TotalDamage_By_Cycle = TotalDamage_By_Cycle; % Initial as in at the start of the next cycle
+        Initial_TotalDamage_By_Cycle = TotalDamage_By_Cycle{Cycle_Counter}; % Initial as in at the start of the next cycle
         
         
         %% SA: Calcualting correlations between the increment of total damage by cycle and each material property
@@ -1179,10 +993,10 @@ for Event_No = 1:length(Dwell_Times)
         
         %% Calculating the probability of failure as a fuction of time
         
-        Prob_Fail(Cycle_Counter) = sum(TotalDamage_By_Cycle>1)./Nb;
+        Prob_Fail(Cycle_Counter) = sum(TotalDamage_By_Cycle{Cycle_Counter}>1)./Nb;
         
-        Mean_Log_Damage(Cycle_Counter) = mean(log10(TotalDamage_By_Cycle));
-        STD_Log_Damage(Cycle_Counter) = std(log10(TotalDamage_By_Cycle));
+        Mean_Log_Damage(Cycle_Counter) = mean(log10(TotalDamage_By_Cycle{Cycle_Counter}));
+        STD_Log_Damage(Cycle_Counter) = std(log10(TotalDamage_By_Cycle{Cycle_Counter}));
         
         Total_Strain_Range(Cycle_Counter) = median(Fatigue_Varep_T);
         
@@ -1274,7 +1088,6 @@ SO_Stress_SA.SO_Sigma_B_SA_Per_Event = SO_Sigma_B_SA_Per_Event;
 memory
 
 end
-
 
 
 function PrepareWorkSpace(Asmt_Sets_Filename,WorkSpace_Filename)
@@ -1371,80 +1184,6 @@ save(WorkSpace_Filename); % This is to be later used by each individual worker i
 end
 
 
-function Conduct_Sigma_SA(Tube)
-
-AnalysisType = 'Probabilistic';
-Conduct_SA = 1;
-Nb = 1000;
-
-PostAsmtPlots = 0;
-
-N_SA_Samples = 10;
-
-Direct = cd;
-cd('C:\Users\nz9512\Google Drive\1. PhD Work\3. TPL FEA\PlayGround\11. Probabilistic Assessment\SA')
-load('SA_Sigma_Based_Results_V2.mat')
-cd(Direct)
-
-for SAParam = 8:15
-    
-    parfor NBin = 1:N_SA_Samples
-        LHS_Bin(SAParam,NBin) = round(NBin/N_SA_Samples*Nb);
-        [Sigma_SA_TotalDamage{SAParam,NBin}] =  TPL_Prob_Asmt_V7(Nb,Tube,AnalysisType,Conduct_SA,SAParam,LHS_Bin(SAParam,NBin),PostAsmtPlots);
-    end
-    
-    Direct = cd;
-    cd('C:\Users\nz9512\Google Drive\1. PhD Work\3. TPL FEA\PlayGround\11. Probabilistic Assessment\SA')
-    save('SA_Sigma_Based_Results_V2.mat','Sigma_SA_TotalDamage')
-    cd(Direct)
-    
-end
-
-end
-
-function Conduct_VB_SA(Tube)
-
-AnalysisType = 'Probabilistic';
-Conduct_SA = 1;
-Nb = 1000;
-LHS_Bin = Nb/2;
-
-PostAsmtPlots = 0;
-
-
-for SAParam = 1:15
-    Var_Total_Damage{SAParam} = 0;
-    STD_Total_Damage{SAParam} = 0;
-end
-
-
-for SAParam = 1:15
-    TotalDamage{SAParam} = TPL_Prob_Asmt_V7(Nb,Tube,AnalysisType,Conduct_SA,SAParam,LHS_Bin,PostAsmtPlots);
-    
-    Var_Total_Damage{SAParam} = var(cell2mat(TotalDamage{SAParam}));
-    STD_Total_Damage{SAParam} = std(cell2mat(TotalDamage{SAParam}));
-end
-
-
-% Conduct the base line assessment
-
-SAParam = 0;
-Conduct_SA = 0;
-TotalDamage = TPL_Prob_Asmt_V7(Nb,Tube,AnalysisType,Conduct_SA,SAParam,LHS_Bin,PostAsmtPlots);
-Var_Total_Damage_All_Params = var(cell2mat(TotalDamage));
-STD_Total_Damage_All_Params = std(cell2mat(TotalDamage));
-
-Direct = cd;
-cd('C:\Users\nz9512\Google Drive\1. PhD Work\3. TPL FEA\PlayGround\11. Probabilistic Assessment\SA')
-save('SA_Var_Based_Results.mat','STD_Total_Damage','Var_Total_Damage','Var_Total_Damage_All_Params','STD_Total_Damage_All_Params')
-cd(Direct)
-
-end
-
-
-
-
-
 
 %% Scripts for fitting distributions
 
@@ -1456,7 +1195,6 @@ LRM_Resutls = UoB_DistFitter_LRM(Data,[]);
 
 
 end
-
 
 function Resutls = UoB_DistFitter_MLE(Data,Dist_Option)
 
@@ -3062,7 +2800,7 @@ save(['Transient_Stress_Samples_10_Tubes_' num2str(Nb) '_Samples.mat'],'Prob_SU_
 
 end
 
-function [Prob_SU_Strs,Prob_SU_Temps,Prob_RT_Strs,Prob_RT_Temps] = AssignCycleTransients(Nb,LHS,CycleNo,Tubes,Plot_Transient_Histograms,AnalysisType,Conduct_SA,SAParam)
+function [Prob_SU_Strs,Prob_SU_Temps,Prob_RT_Strs,Prob_RT_Temps] = AssignCycleTransients(Nb,LHS,CycleNo,Tubes,Plot_Transient_Histograms,AnalysisType)
 
 % Assign the transient samples based on how the tube configuration
 % changes between the transient FE and the SS FE (the latter was a 1/6th model)
@@ -3070,9 +2808,13 @@ function [Prob_SU_Strs,Prob_SU_Temps,Prob_RT_Strs,Prob_RT_Temps] = AssignCycleTr
 try
     load(['Transient_Stress_Samples_10_Tubes_' num2str(Nb) '_Samples.mat'])
 catch
-    load(['Transient_Stress_Samples_10_Tubes_' num2str(10000) '_Samples.mat'])
+    if Nb < 10000
+        load(['Transient_Stress_Samples_10_Tubes_' num2str(1000) '_Samples.mat'])
+    else
+        load(['Transient_Stress_Samples_10_Tubes_' num2str(10000) '_Samples.mat'])
+    end
 end
-    
+
 
 
 Transient_to_SS_Tube_Order = xlsread('Transient_Tube_Numbering.xlsx');
@@ -3106,34 +2848,7 @@ for Tube = Tubes
                 RT_RandPerm = SU_RandPerm ; % For RTs use the same perm
                 Prob_RT_Strs{Tube,C} = Prob_RT_Strs{Tube,C}(RT_RandPerm,:);
                 Prob_RT_Temps{Tube,C} = Prob_RT_Temps{Tube,C}(RT_RandPerm);
-                
-                % This is for the case a SA is being conducted
-                if Conduct_SA
-                    switch SAParam
-                        case 10
-                            DomStrComp = 2;
-                            [~,SU_DomStrComp_Order] = sort(Prob_SU_Strs{Tube,C}(:,DomStrComp));
-                            Prob_SU_Strs{Tube,C} = Prob_SU_Strs{Tube,C}(SU_DomStrComp_Order,:);
-                            Prob_SU_Strs{Tube,C} = Prob_SU_Strs{Tube,C}(LHS(:,10),:);
-                            
-                        case 11
-                            DomStrComp = 2;
-                            [~,RT_DomStrComp_Order] = sort(Prob_RT_Strs{Tube,C}(:,DomStrComp));
-                            Prob_RT_Strs{Tube,C} = Prob_RT_Strs{Tube,C}(RT_DomStrComp_Order,:);
-                            Prob_RT_Strs{Tube,C} = Prob_RT_Strs{Tube,C}(LHS(:,11),:);
-                            
-                        case 12
-                            Sorted_Prob_SU_Temps = sort(Prob_SU_Temps{Tube,C});
-                            Prob_SU_Temps{Tube,C} = Sorted_Prob_SU_Temps(LHS(:,12));
-                            
-                        case 13
-                            Sorted_Prob_RT_Temps = sort(Prob_RT_Temps{Tube,C});
-                            Prob_RT_Temps{Tube,C} = Sorted_Prob_RT_Temps(LHS(:,13));
-                            
-                    end
-                end
-                
-                
+                 
             case 'Deterministic'
                 
                 % Assigning the deterministic transient stresses according
@@ -3487,14 +3202,13 @@ function [StressRanges,Tilts] = Calcualte_Stress_Ranges(X,All_Ys,Tube,A,Plot_Ran
 
 Direct = cd;
 
-[Prob_SU_Strs,~,~,~] = AssignCycleTransients(Nb,LHS,CycleNo,Tube,0,AnalysisType,Conduct_SA,SAParam);
+[Prob_SU_Strs,~,~,~] = AssignCycleTransients(Nb,LHS,CycleNo,Tube,0,AnalysisType);
 
 cd(Direct)
 
 [~,Unique_SU_Indx,~] = unique(Prob_SU_Strs{Tube,1}(:,1));
 
 SU_Strs = Prob_SU_Strs{Tube,1}(Unique_SU_Indx,:);
-
 
 
 % Calculating the stress ranges for each event based on the all SU
@@ -3592,7 +3306,7 @@ end
 
 end
 
-%% Script for calculating the Spindler Fraction
+%% Scripts for calculating creep parameters
 
 function [UniDuct_S_Frac,Sigma_H,Sigma_1,Sigma_VM,Flag_NoCreepDamage] = SpindlerFraction(Event_Stress_Comps)
 
@@ -3815,7 +3529,6 @@ Temp_Index = Ix(IU);
 end
 
 
-
 function [Creep_Strain_Rate,Creep_Strain_Rate_Ref] = Prob_Creep_Rate(Creep_Strain,Plastic_Strain,Zeta_P,Accumlated_creep_strain,Dwell_Stress,SigmaRupRef,Event_Temp,Normalised_Bins,LHS,PR_Options)
 
 [Creep_Strain_Rate,Creep_Strain_Rate_LB,Creep_Strain_Rate_Ref] = HTBASS(Creep_Strain,Plastic_Strain,Zeta_P,Accumlated_creep_strain,Dwell_Stress,SigmaRupRef,Event_Temp,PR_Options);
@@ -3934,26 +3647,6 @@ end
 end
 
 
-
-
-
-
-
-function [Varep_f_Mean,Varep_f_SMDE_LB] = Removing_NonRealistic_Ductilities(Varep_f_Mean,Varep_f_SMDE_LB)
-
-if sum(Varep_f_Mean > Varep_f_SMDE_LB) ~= 0
-    Valid_Ductilities = [Varep_f_Mean(Varep_f_Mean > Varep_f_SMDE_LB) Varep_f_SMDE_LB(Varep_f_Mean > Varep_f_SMDE_LB)];
-    No_Missing = length(Varep_f_Mean) - size(Valid_Ductilities,1);
-    Valid_Ductilities = [ones(No_Missing,1).*Valid_Ductilities(1,1) ones(No_Missing,1).* Valid_Ductilities(1,2);Valid_Ductilities];
-else
-    Valid_Ductilities = [Varep_f_Mean  Varep_f_Mean] ;
-end
-
-Varep_f_Mean = Valid_Ductilities(:,1);
-Varep_f_SMDE_LB = Valid_Ductilities(:,2);
-
-end
-
 function Fatigue = FatigueDamage_V2(Varep_T,Temp,ConfFactor,Normalised_Bins,LHS)
 
 Nf_BE = CalculateFatigueEndurance(1.00.*Varep_T,Temp);
@@ -3984,7 +3677,6 @@ Fatigue =  1./N0;
 
 
 end
-
 
 function Nf = CalculateFatigueEndurance(Varep_T,Temp)
 

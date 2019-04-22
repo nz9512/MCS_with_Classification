@@ -17,11 +17,11 @@ AnalysisType = 'Probabilistic'; %
 % PoI (e.g. TubeOrderByPoI(1:10)) are set to be examined.
 
 load('TubeOrderByPoI.mat'); 
-Tubes = TubeOrderByPoI(1:2); % Tubes = TubeOrderByPoI(1:37)';
+Tubes = TubeOrderByPoI(2); % Tubes = TubeOrderByPoI(1:37)';
 
 
 % Number of bin in the latin-hyerpercube per input parameter:
-Nb = 50000;
+Nb = 10000;
 
 % Conducting the MCS
 [TotalDamage, LHS] = TPL_Prob_Asmt_V7(Nb,Tubes,AnalysisType);
@@ -39,10 +39,10 @@ format long
 Reset_Settings = 1; % This refers to the reshuffling of the latin-hypercube 
 Repeat_History_Data_Analysis = 0;
 Repeat_Transient_Sampling = 0;
+ReprepareWorkspace = 0;
 Plot_SS_Temp_Histograms = 0;
 Plot_SO_Samples = 0;
 Plot_Transient_Histograms = 0;
-
 
 No_Asmt_Locations_Per_Tube = 1;
 Corr_SA = 0;
@@ -111,7 +111,6 @@ end
 
 %% Preparing a workspace that's shared by all tubes
 
-ReprepareWorkspace = 1;
 
 if ReprepareWorkspace
     PrepareWorkSpace(Asmt_Sets_Filename,WorkSpace_Filename)
@@ -127,7 +126,7 @@ end
 % On an 8-core machine, 4-6 workers work well while keeping enough memory 
 % and cpu for the machine to do other functions.
 
-Start_Parallel_Pool = 1;
+Start_Parallel_Pool = 0;
 N_Workers = 2; 
 
 if Start_Parallel_Pool
@@ -217,8 +216,12 @@ end
 
 %% Prepare transients for probabilistic assessment
 
-[SU_Strs_Samples,SU_Temps_Samples,RT_Strs_Samples,RT_Temps_Samples] = AssignCycleTransients(Nb,LHS,CycleNo,Tube,Plot_Transient_Histograms,AnalysisType);
-
+if Repeat_Transient_Sampling
+    [SU_Strs_Samples,SU_Temps_Samples,RT_Strs_Samples,RT_Temps_Samples] = AssignCycleTransients(Nb,LHS,CycleNo,Tube,Plot_Transient_Histograms,AnalysisType);
+    save(['Transient_Inputs_' num2str(Nb) '_Samples.mat'],'SU_Strs_Samples','SU_Temps_Samples','RT_Strs_Samples','RT_Temps_Samples')
+else
+    load(['Transient_Inputs_' num2str(Nb) '_Samples.mat']);
+end
 
 %% Qunatities related to BT and RC transients (these are incorprated within the history loop later)
 
