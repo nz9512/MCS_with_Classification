@@ -17,11 +17,11 @@ AnalysisType = 'Probabilistic'; %
 % PoI (e.g. TubeOrderByPoI(1:10)) are set to be examined.
 
 load('TubeOrderByPoI.mat'); 
-Tubes = TubeOrderByPoI(2); % Tubes = TubeOrderByPoI(1:37)';
+Tubes = TubeOrderByPoI(1); % Tubes = TubeOrderByPoI(1:37)';
 
 
 % Number of bin in the latin-hyerpercube per input parameter:
-Nb = 10000;
+Nb = 1000;
 
 % Conducting the MCS
 [TotalDamage, LHS] = TPL_Prob_Asmt_V7(Nb,Tubes,AnalysisType);
