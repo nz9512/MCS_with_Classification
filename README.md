@@ -19,10 +19,10 @@ For my PhD, I conducted simulations to estimate the PoF of specific points on a 
 So here is the premise of this project: what if a machine-learning algorithm can be trained to use the results from a computationally cheap 10^3 MCS to identify the trails in a computationally expensive 10^4 simulation that are most likely to fail? This is essentially a classification problem with the 10^3 results data being using to train a model in order to classify the 10^4 trails into 'likely to fail' and 'not likely to fail'. If this classification is successful, then only a fraction of the 10^4 MCS trials would require evaluating, therefore saving significant computational efforts. To clarify, the classification strategy is NOT intended to predict the MCS results, but rather to target the ones that are needed to calculate the PoF, and as such it doesn't predict anything but rather focuses and saves computational efforts.  This classification strategy would be undoubtedly valuable if a MCS with a very large N is required (e.g. N >= 10^6) which would normally take days to run, but with the classification strategy may take mere hours.
 
 ## Files in this Repository
-### Matlab Script (<code>TPL_MCS.m</code>)
+### Matlab Script (TPL_MCS.m)
 This is the Matlab script that I wrote for my PhD and was used to produce the results for 10^3,10^4, and 10^5 trials (see the results files). When evaluating all trails, these three sets of MCS results took on average 30min, 2 hour and 9 hours respectively.  In this script, two key inputs are 'Nb' and 'Tubes', the former being the number of MCS trials required and the latter referring to the intended assessment location (which are the tubes in the TPL component; 37 tubes in total). 
  
-### Python Script (<code>Classification_for_MCS.ipynb</code>)
+### Python Script (Classification_for_MCS.ipynb)
 This is a Python script (Jupyter Notebook) that I'm developing using machine learning classification (Scikit-Learn) in order to reduce the number of MCS trails. For this script to run, only the results files (see below) are required. 
 
 ### Results files
